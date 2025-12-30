@@ -176,7 +176,9 @@ def parse_skills_from_text(text):
                         # Filter out invalid skill names
                         if not re.search(r'\d', skill_name):
                             skills.append({'skill': skill_name, 'score': score})
-                        i += 1  # Skip the next line since we've processed it
+
+                    # Skip the next line since we've processed it (whether valid or not)
+                    i += 1
 
         i += 1
 
