@@ -96,15 +96,15 @@ def parse_star_rating(text_snippet):
     return star_count if star_count > 0 else 0
 
 def extract_skills_and_scores(pdf_bytes):
-    """Extract assessment areas and scores from page 3 onwards"""
+    """Extract assessment areas and scores from page 2 onwards"""
     skills_data = []
 
     try:
         doc = fitz.open(stream=pdf_bytes, filetype="pdf")
         total_pages = len(doc)
 
-        # Process pages 3 onwards (index 2+)
-        for page_num in range(2, total_pages):
+        # Process pages 2 onwards (index 1 = page 2, index 2 = page 3, etc.)
+        for page_num in range(1, total_pages):
             page = doc[page_num]
             text = extract_text_from_page_ocr(page)
 
@@ -216,13 +216,13 @@ def main():
 
                     # Show debug info if enabled
                     if debug_mode:
-                        st.subheader("Debug: OCR Output from Page 3")
+                        st.subheader("Debug: OCR Output from Page 2")
                         try:
                             doc = fitz.open(stream=pdf_bytes, filetype="pdf")
                             if len(doc) > 2:
-                                page = doc[2]
+                                page = doc[1]
                                 text = extract_text_from_page_ocr(page)
-                                st.text_area("Page 3 OCR Text", text, height=300)
+                                st.text_area("Page 2 OCR Text", text, height=300)
                             doc.close()
                         except Exception as e:
                             st.error(f"Debug error: {str(e)}")
