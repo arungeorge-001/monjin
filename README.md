@@ -93,3 +93,12 @@ Run the test script to verify extraction:
 ```bash
 python test_extraction.py
 ```
+
+## Deployment to Streamlit Cloud
+
+When deploying to Streamlit Cloud, the `packages.txt` file will automatically install Tesseract OCR. Make sure both files are included in your repository:
+
+1. **packages.txt** - Contains system dependencies (tesseract-ocr)
+2. **requirements.txt** - Contains Python dependencies
+
+The app will work automatically once deployed to Streamlit Cloud with these configuration files.
