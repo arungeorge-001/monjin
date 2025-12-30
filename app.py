@@ -278,14 +278,22 @@ def parse_skills_with_image_detection(text, img, ocr_data):
 
         i += 1
 
+    # Debug: Show how many skills were found
+    # st.write(f"DEBUG: Found {len(skill_names)} skills with positions")
+
+    # If no skills found via image detection, return empty to trigger fallback
+    if not skill_names:
+        return []
+
     # Now use image analysis to detect stars for each skill
     img_width = img.width
 
     for skill_name, y_pos in zip(skill_names, skill_positions):
         star_count = detect_stars_from_image(img, y_pos, img_width)
 
-        if star_count > 0:
-            skills.append({'skill': skill_name, 'score': star_count})
+        # Include skill with detected star count
+        # If detection fails (returns 0), we still add it for debugging
+        skills.append({'skill': skill_name, 'score': max(star_count, 1)})
 
     return skills
 
