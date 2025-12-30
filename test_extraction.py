@@ -50,16 +50,24 @@ def parse_star_rating(text_snippet):
     star_count += text_snippet.count('★')
     star_count += text_snippet.count('⭐')
 
+    # Count exclamation marks (OCR sometimes reads stars as !)
+    exclamation_count = text_snippet.count('!')
+    if exclamation_count > 0:
+        star_count += exclamation_count
+
     if star_count > 0:
         return star_count
 
     # Check for OCR patterns if no direct stars found
-    # OCR often reads 3 stars (★★★) as "Kk" or "KKK", 2 stars (★★) as "kk"
+    # OCR often reads 3 stars (★★★) as "Kk", "KKK", "kkk", etc.
+    # Different Tesseract versions may produce different results
     star_patterns = [
-        (r'kkk', 3),  # Three stars as "KKK" or "kkk"
-        (r'kk', 3),   # Two K's often means 3 stars (Kk from OCR of ★★★)
+        (r'k\s*k\s*k', 3),  # Three K's with possible spaces
+        (r'k\s*k', 3),   # Two K's often means 3 stars (Kk from OCR of ★★★)
         (r'>\s*oo\.\s*[0-9]', 3),  # Pattern like "> oo. 4"
         (r'>\s*oo', 3),  # Pattern like "> oo"
+        (r'[!|l]{3,}', 3),  # Three or more !, |, or l characters
+        (r'[!|l]{2}', 2),  # Two !, |, or l characters
     ]
 
     text_lower = text_snippet.lower()
@@ -94,7 +102,8 @@ def parse_skills_from_text(text):
             break
 
         if in_jd_skills_section:
-            skill_match = re.match(r'^([A-Za-z\s/]+?)\s+([\*Kk>oo\.\s0-9]+)$', line)
+            # Expanded pattern to include !, |, l, and more flexible matching
+            skill_match = re.match(r'^([A-Za-z\s/]+?)\s+([\*Kk>oo!\|l\.\s0-9]+)$', line)
 
             if skill_match:
                 skill_name = skill_match.group(1).strip()

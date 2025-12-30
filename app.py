@@ -50,7 +50,7 @@ def extract_name_from_pdf(pdf_bytes):
 
 def parse_star_rating(text_snippet):
     """Parse star rating from OCR text - handles various OCR interpretations of stars"""
-    # Stars can be recognized as: *, **, ***, Kk, KKK, > oo, etc.
+    # Stars can be recognized as: *, **, ***, Kk, KKK, !, !!, !!!, > oo, etc.
     # Count individual star characters
     star_count = 0
 
@@ -61,16 +61,24 @@ def parse_star_rating(text_snippet):
     star_count += text_snippet.count('★')
     star_count += text_snippet.count('⭐')
 
+    # Count exclamation marks (OCR sometimes reads stars as !)
+    exclamation_count = text_snippet.count('!')
+    if exclamation_count > 0:
+        star_count += exclamation_count
+
     if star_count > 0:
         return star_count
 
     # Check for OCR patterns if no direct stars found
-    # OCR often reads 3 stars (★★★) as "Kk" or "KKK", 2 stars (★★) as "kk"
+    # OCR often reads 3 stars (★★★) as "Kk", "KKK", "kkk", etc.
+    # Different Tesseract versions may produce different results
     star_patterns = [
-        (r'kkk', 3),  # Three stars as "KKK" or "kkk"
-        (r'kk', 3),   # Two K's often means 3 stars (Kk from OCR of ★★★)
+        (r'k\s*k\s*k', 3),  # Three K's with possible spaces
+        (r'k\s*k', 3),   # Two K's often means 3 stars (Kk from OCR of ★★★)
         (r'>\s*oo\.\s*[0-9]', 3),  # Pattern like "> oo. 4"
         (r'>\s*oo', 3),  # Pattern like "> oo"
+        (r'[!|l]{3,}', 3),  # Three or more !, |, or l characters
+        (r'[!|l]{2}', 2),  # Two !, |, or l characters
     ]
 
     text_lower = text_snippet.lower()
@@ -130,11 +138,12 @@ def parse_skills_from_text(text):
             # Look for skill patterns: "Skill Name * *" or "Skill Name Kk" etc.
             # Common patterns from OCR:
             # - "Cucumber * *"
-            # - "Core Java Kk"
-            # - "Automation Framework > oo. 4"
+            # - "Core Java Kk" or "Core Java kkk"
+            # - "Automation Framework > oo. 4" or "Automation Framework !!!"
 
             # Match lines that have skill names followed by star-like patterns
-            skill_match = re.match(r'^([A-Za-z\s/]+?)\s+([\*Kk>oo\.\s0-9]+)$', line)
+            # Expanded pattern to include !, |, l, and more flexible matching
+            skill_match = re.match(r'^([A-Za-z\s/]+?)\s+([\*Kk>oo!\|l\.\s0-9]+)$', line)
 
             if skill_match:
                 skill_name = skill_match.group(1).strip()
@@ -173,6 +182,9 @@ def main():
     st.title("Monjin - PDF Interview Assessment Extractor")
     st.write("Upload a PDF file to extract interview assessment data")
 
+    # Debug mode toggle
+    debug_mode = st.checkbox("Enable Debug Mode (show OCR output)", value=False)
+
     # File upload
     uploaded_file = st.file_uploader("Choose a PDF file", type=['pdf'])
 
@@ -194,6 +206,19 @@ def main():
                     else:
                         st.warning("Could not extract name automatically. Using 'Unknown' as default.")
                         name = "Unknown"
+
+                    # Show debug info if enabled
+                    if debug_mode:
+                        st.subheader("Debug: OCR Output from Page 3")
+                        try:
+                            doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+                            if len(doc) > 2:
+                                page = doc[2]
+                                text = extract_text_from_page_ocr(page)
+                                st.text_area("Page 3 OCR Text", text, height=300)
+                            doc.close()
+                        except Exception as e:
+                            st.error(f"Debug error: {str(e)}")
 
                     # Extract skills and scores
                     skills_data = extract_skills_and_scores(pdf_bytes)
