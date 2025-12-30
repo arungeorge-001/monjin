@@ -59,11 +59,13 @@ def parse_star_rating(text_snippet):
         return star_count
 
     # Check for OCR patterns if no direct stars found
-    # OCR often reads 3 stars (★★★) as "Kk", "KKK", "kkk", etc.
+    # OCR often reads 3 stars (★★★) as "Kk", "KKK", "kkk", "bo &", etc.
     # Different Tesseract versions may produce different results
     star_patterns = [
         (r'k\s*k\s*k', 3),  # Three K's with possible spaces
         (r'k\s*k', 3),   # Two K's often means 3 stars (Kk from OCR of ★★★)
+        (r'bo\s*&', 3),  # "bo &" is OCR misreading of 3 stars
+        (r'b\s*o', 3),   # "bo" or "b o" variation
         (r'>\s*oo\.\s*[0-9]', 3),  # Pattern like "> oo. 4"
         (r'>\s*oo', 3),  # Pattern like "> oo"
         (r'[!|l]{3,}', 3),  # Three or more !, |, or l characters
@@ -102,8 +104,8 @@ def parse_skills_from_text(text):
             break
 
         if in_jd_skills_section:
-            # Expanded pattern to include !, |, l, and more flexible matching
-            skill_match = re.match(r'^([A-Za-z\s/]+?)\s+([\*Kk>oo!\|l\.\s0-9]+)$', line)
+            # Expanded pattern to include !, |, l, &, b, o and more flexible matching
+            skill_match = re.match(r'^([A-Za-z\s/]+?)\s+([\*Kk>oo!\|lb&\.\s0-9]+)$', line)
 
             if skill_match:
                 skill_name = skill_match.group(1).strip()
