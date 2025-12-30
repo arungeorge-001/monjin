@@ -163,22 +163,25 @@ def parse_skills_from_text(text):
             # Pattern 2: Skill name on one line, stars on the next line
             # e.g., "Kafka" followed by "xk" on next line
             elif re.match(r'^[A-Za-z\s/\(\),]+$', line) and i + 1 < len(lines):
-                # Check if next line looks like a star rating
-                next_line = lines[i + 1].strip()
-                if re.match(r'^[\*Kk>oo!\|lb&x\.\s0-9]+$', next_line):
-                    skill_name = line.strip()
-                    rating_text = next_line
+                # First check that current line is NOT a rating pattern
+                # This prevents rating lines like "xk" from being treated as skill names
+                if not re.match(r'^[\*Kk>oo!\|lb&x\.\s0-9]+$', line):
+                    # Check if next line looks like a star rating
+                    next_line = lines[i + 1].strip()
+                    if re.match(r'^[\*Kk>oo!\|lb&x\.\s0-9]+$', next_line):
+                        skill_name = line.strip()
+                        rating_text = next_line
 
-                    # Parse the star rating
-                    score = parse_star_rating(rating_text)
+                        # Parse the star rating
+                        score = parse_star_rating(rating_text)
 
-                    if skill_name and score > 0:
-                        # Filter out invalid skill names
-                        if not re.search(r'\d', skill_name):
-                            skills.append({'skill': skill_name, 'score': score})
+                        if skill_name and score > 0:
+                            # Filter out invalid skill names
+                            if not re.search(r'\d', skill_name):
+                                skills.append({'skill': skill_name, 'score': score})
 
-                    # Skip the next line since we've processed it (whether valid or not)
-                    i += 1
+                        # Skip the next line since we've processed it (whether valid or not)
+                        i += 1
 
         i += 1
 
