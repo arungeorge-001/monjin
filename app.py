@@ -50,7 +50,7 @@ def extract_name_from_pdf(pdf_bytes):
 
 def parse_star_rating(text_snippet):
     """Parse star rating from OCR text - handles various OCR interpretations of stars"""
-    # Stars can be recognized as: *, **, ***, Kk, > oo, etc.
+    # Stars can be recognized as: *, **, ***, Kk, KKK, > oo, etc.
     # Count individual star characters
     star_count = 0
 
@@ -65,9 +65,10 @@ def parse_star_rating(text_snippet):
         return star_count
 
     # Check for OCR patterns if no direct stars found
+    # OCR often reads 3 stars (★★★) as "Kk" or "KKK", 2 stars (★★) as "kk"
     star_patterns = [
-        (r'kkk', 3),  # Three stars as "KKK"
-        (r'kk', 2),   # Two stars as "KK"
+        (r'kkk', 3),  # Three stars as "KKK" or "kkk"
+        (r'kk', 3),   # Two K's often means 3 stars (Kk from OCR of ★★★)
         (r'>\s*oo\.\s*[0-9]', 3),  # Pattern like "> oo. 4"
         (r'>\s*oo', 3),  # Pattern like "> oo"
     ]
@@ -102,27 +103,30 @@ def extract_skills_and_scores(pdf_bytes):
     return skills_data
 
 def parse_skills_from_text(text):
-    """Parse skills and scores from extracted OCR text"""
+    """Parse skills and scores from extracted OCR text - only from JD Skills Feedback section"""
     skills = []
     lines = [line.strip() for line in text.split('\n') if line.strip()]
 
-    in_skills_section = False
+    in_jd_skills_section = False
     i = 0
 
     while i < len(lines):
         line = lines[i]
 
-        # Check if we're in a skills feedback section
-        if 'Skills Feedback' in line or 'Feedback' in line:
-            in_skills_section = True
+        # Check if we're entering the JD Skills Feedback section
+        if 'JD Skills Feedback' in line:
+            in_jd_skills_section = True
             i += 1
             continue
 
-        # Stop at certain sections
-        if 'AI Assessment' in line or 'Summary of Questions' in line or 'Overall Feedback' in line:
+        # Stop at other feedback sections or end sections
+        if in_jd_skills_section and ('Timeline Skills Feedback' in line or
+                                      'AI Assessment' in line or
+                                      'Summary of Questions' in line or
+                                      'Overall Feedback' in line):
             break
 
-        if in_skills_section:
+        if in_jd_skills_section:
             # Look for skill patterns: "Skill Name * *" or "Skill Name Kk" etc.
             # Common patterns from OCR:
             # - "Cucumber * *"
