@@ -142,15 +142,9 @@ def parse_skills_from_text(text):
             break
 
         if in_jd_skills_section:
-            # Look for skill patterns: "Skill Name * *" or "Skill Name Kk" etc.
-            # Common patterns from OCR:
-            # - "Cucumber * *"
-            # - "Core Java Kk" or "Core Java kkk"
-            # - "Automation Framework > oo. 4" or "Automation Framework !!!"
-
-            # Match lines that have skill names followed by star-like patterns
-            # Expanded pattern to include !, |, l, &, b, o and more flexible matching
-            skill_match = re.match(r'^([A-Za-z\s/]+?)\s+([\*Kk>oo!\|lb&\.\s0-9]+)$', line)
+            # Pattern 1: Skill name and stars on the same line
+            # e.g., "Cucumber * *" or "Core Java Kk"
+            skill_match = re.match(r'^([A-Za-z\s/\(\),]+?)\s+([\*Kk>oo!\|lb&x\.\s0-9]+)$', line)
 
             if skill_match:
                 skill_name = skill_match.group(1).strip()
@@ -162,10 +156,27 @@ def parse_skills_from_text(text):
                 if skill_name and score > 0:
                     # Clean up skill name
                     skill_name = skill_name.replace('  ', ' ').strip()
-
-                    # Filter out invalid skill names (containing x, numbers, etc.)
-                    if not re.search(r'[x0-9]', skill_name.lower()):
+                    # Filter out invalid skill names (containing numbers)
+                    if not re.search(r'\d', skill_name):
                         skills.append({'skill': skill_name, 'score': score})
+
+            # Pattern 2: Skill name on one line, stars on the next line
+            # e.g., "Kafka" followed by "xk" on next line
+            elif re.match(r'^[A-Za-z\s/\(\),]+$', line) and i + 1 < len(lines):
+                # Check if next line looks like a star rating
+                next_line = lines[i + 1].strip()
+                if re.match(r'^[\*Kk>oo!\|lb&x\.\s0-9]+$', next_line):
+                    skill_name = line.strip()
+                    rating_text = next_line
+
+                    # Parse the star rating
+                    score = parse_star_rating(rating_text)
+
+                    if skill_name and score > 0:
+                        # Filter out invalid skill names
+                        if not re.search(r'\d', skill_name):
+                            skills.append({'skill': skill_name, 'score': score})
+                        i += 1  # Skip the next line since we've processed it
 
         i += 1
 
@@ -219,7 +230,7 @@ def main():
                         st.subheader("Debug: OCR Output from Page 2")
                         try:
                             doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-                            if len(doc) > 2:
+                            if len(doc) > 1:
                                 page = doc[1]
                                 text = extract_text_from_page_ocr(page)
                                 st.text_area("Page 2 OCR Text", text, height=300)
