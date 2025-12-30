@@ -6,20 +6,108 @@ import fitz  # PyMuPDF
 from PIL import Image
 import pytesseract
 import io
+import numpy as np
 
-def extract_text_from_page_ocr(page, dpi=300):
-    """Extract text from a PDF page using OCR"""
+def is_filled_star_pixel(pixel_rgb):
+    """Check if pixel is part of a filled (orange) star"""
+    r, g, b = pixel_rgb[:3]  # Handle both RGB and RGBA
+    # Orange stars: high red, medium-high green, low blue
+    # Calibrated for typical PDF star rendering
+    return (r > 180 and 80 < g < 200 and b < 100)
+
+def detect_stars_from_image(img, skill_row_y, img_width):
+    """
+    Detect filled stars in a horizontal row by analyzing orange pixels
+
+    Args:
+        img: PIL Image object
+        skill_row_y: Vertical position (y coordinate) of the skill row
+        img_width: Width of the image
+
+    Returns:
+        Number of filled (orange) stars detected
+    """
+    try:
+        # Convert image to numpy array for faster processing
+        img_array = np.array(img)
+
+        # Define the vertical range to scan (around the skill row)
+        # Stars are typically 15-25 pixels tall
+        row_height = 25
+        y_start = max(0, skill_row_y - 5)
+        y_end = min(img_array.shape[0], skill_row_y + row_height)
+
+        # Define horizontal range - stars are typically in the right portion of the page
+        # Assume stars start around 60% of page width
+        x_start = int(img_width * 0.6)
+        x_end = img_width
+
+        # Extract the region of interest
+        roi = img_array[y_start:y_end, x_start:x_end]
+
+        # Create a mask of orange pixels
+        orange_mask = np.zeros(roi.shape[:2], dtype=bool)
+        for y in range(roi.shape[0]):
+            for x in range(roi.shape[1]):
+                if is_filled_star_pixel(roi[y, x]):
+                    orange_mask[y, x] = True
+
+        # Count distinct orange regions horizontally
+        # Each contiguous orange region = one star
+        star_count = 0
+        in_star = False
+
+        # Scan horizontally across the middle of the ROI
+        mid_y = orange_mask.shape[0] // 2
+        if mid_y < orange_mask.shape[0]:
+            row_scan = orange_mask[mid_y, :]
+
+            for x in range(len(row_scan)):
+                if row_scan[x] and not in_star:
+                    # Start of a new star
+                    star_count += 1
+                    in_star = True
+                elif not row_scan[x] and in_star:
+                    # End of current star
+                    in_star = False
+
+        return star_count
+
+    except Exception as e:
+        # If image analysis fails, return 0
+        return 0
+
+def extract_text_from_page_ocr(page, dpi=300, return_bounding_boxes=False):
+    """Extract text from a PDF page using OCR
+
+    Args:
+        page: PyMuPDF page object
+        dpi: Resolution for rendering
+        return_bounding_boxes: If True, return (text, image, ocr_data) tuple
+
+    Returns:
+        If return_bounding_boxes=False: text string
+        If return_bounding_boxes=True: (text, image, ocr_data) tuple
+    """
     try:
         # Convert page to image
         pix = page.get_pixmap(dpi=dpi)
         img_data = pix.tobytes('png')
         img = Image.open(io.BytesIO(img_data))
 
-        # Perform OCR
-        text = pytesseract.image_to_string(img)
-        return text
+        if return_bounding_boxes:
+            # Perform OCR with bounding box data
+            ocr_data = pytesseract.image_to_data(img, output_type=pytesseract.Output.DICT)
+            text = pytesseract.image_to_string(img)
+            return text, img, ocr_data
+        else:
+            # Perform standard OCR
+            text = pytesseract.image_to_string(img)
+            return text
     except Exception as e:
         st.error(f"OCR error: {str(e)}")
+        if return_bounding_boxes:
+            return "", None, None
         return ""
 
 def extract_name_from_pdf(pdf_bytes):
@@ -109,7 +197,7 @@ def parse_star_rating(text_snippet):
     return star_count if star_count > 0 else 0
 
 def extract_skills_and_scores(pdf_bytes):
-    """Extract assessment areas and scores from page 2 onwards"""
+    """Extract assessment areas and scores from page 2 onwards using image-based star detection"""
     skills_data = []
 
     try:
@@ -119,10 +207,19 @@ def extract_skills_and_scores(pdf_bytes):
         # Process pages 2 onwards (index 1 = page 2, index 2 = page 3, etc.)
         for page_num in range(1, total_pages):
             page = doc[page_num]
-            text = extract_text_from_page_ocr(page)
 
-            # Extract skills from text
-            skills_data.extend(parse_skills_from_text(text))
+            # Extract text with bounding boxes and get the image
+            text, img, ocr_data = extract_text_from_page_ocr(page, return_bounding_boxes=True)
+
+            if img is None or ocr_data is None:
+                # Fallback to OCR-only mode
+                text = extract_text_from_page_ocr(page)
+                skills_data.extend(parse_skills_from_text(text))
+                continue
+
+            # Parse skill names from text
+            skills_with_positions = parse_skills_with_image_detection(text, img, ocr_data)
+            skills_data.extend(skills_with_positions)
 
         doc.close()
     except Exception as e:
@@ -130,8 +227,101 @@ def extract_skills_and_scores(pdf_bytes):
 
     return skills_data
 
+def parse_skills_with_image_detection(text, img, ocr_data):
+    """
+    Parse skills using image-based star detection
+
+    Args:
+        text: OCR extracted text
+        img: PIL Image object
+        ocr_data: Tesseract OCR data dictionary with bounding boxes
+
+    Returns:
+        List of {'skill': skill_name, 'score': star_count} dictionaries
+    """
+    skills = []
+    lines = [line.strip() for line in text.split('\n') if line.strip()]
+
+    in_jd_skills_section = False
+    skill_names = []
+    skill_positions = []  # Store y-coordinates for each skill
+
+    # First, extract skill names and their positions from OCR data
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+
+        # Check if we're entering the JD Skills Feedback section
+        if 'JD Skills Feedback' in line:
+            in_jd_skills_section = True
+            i += 1
+            continue
+
+        # Stop at other feedback sections
+        if in_jd_skills_section and ('Timeline Skills Feedback' in line or
+                                      'AI Assessment' in line or
+                                      'Summary of Questions' in line or
+                                      'Overall Feedback' in line):
+            break
+
+        if in_jd_skills_section:
+            # Check if line is a skill name (alphabetic with allowed special chars)
+            if re.match(r'^[A-Za-z\s/\(\),]+$', line) and not re.search(r'\d', line):
+                skill_name = line.strip()
+
+                # Find the y-coordinate of this skill name in OCR data
+                y_coord = find_text_position_in_ocr(skill_name, ocr_data)
+
+                if y_coord is not None:
+                    skill_names.append(skill_name)
+                    skill_positions.append(y_coord)
+
+        i += 1
+
+    # Now use image analysis to detect stars for each skill
+    img_width = img.width
+
+    for skill_name, y_pos in zip(skill_names, skill_positions):
+        star_count = detect_stars_from_image(img, y_pos, img_width)
+
+        if star_count > 0:
+            skills.append({'skill': skill_name, 'score': star_count})
+
+    return skills
+
+def find_text_position_in_ocr(search_text, ocr_data):
+    """
+    Find the vertical position (y-coordinate) of text in OCR data
+
+    Args:
+        search_text: Text to search for
+        ocr_data: Tesseract OCR data dictionary
+
+    Returns:
+        Y-coordinate (int) or None if not found
+    """
+    try:
+        n_boxes = len(ocr_data['text'])
+        search_words = search_text.lower().split()
+
+        # Try to find the first word of the skill name
+        if search_words:
+            first_word = search_words[0]
+
+            for i in range(n_boxes):
+                word = ocr_data['text'][i].lower().strip()
+
+                if word == first_word and ocr_data['top'][i] > 0:
+                    # Return the vertical center of the bounding box
+                    return ocr_data['top'][i] + ocr_data['height'][i] // 2
+
+    except Exception:
+        pass
+
+    return None
+
 def parse_skills_from_text(text):
-    """Parse skills and scores from extracted OCR text - only from JD Skills Feedback section"""
+    """Parse skills and scores from extracted OCR text - only from JD Skills Feedback section (FALLBACK)"""
     skills = []
     lines = [line.strip() for line in text.split('\n') if line.strip()]
 
