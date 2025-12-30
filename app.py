@@ -59,6 +59,9 @@ def parse_star_rating(text_snippet):
     star_patterns = [
         (r'k\s*k\s*k', 3),  # Three K's with possible spaces
         (r'k\s*k', 3),   # Two K's often means 3 stars (Kk from OCR of ★★★)
+        (r'x\s*k', 3),   # "xk" is OCR misreading of 3 stars
+        (r'^x\s*\*', 3),   # "x*" is OCR misreading of 3 stars
+        (r'^x$', 3),   # Single "x" is OCR misreading of 3 stars
         (r'bo\s*&', 3),  # "bo &" is OCR misreading of 3 stars
         (r'b\s*o', 3),   # "bo" or "b o" variation
         (r'>\s*oo\.\s*[0-9]', 3),  # Pattern like "> oo. 4"
