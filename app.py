@@ -51,7 +51,25 @@ def extract_name_from_pdf(pdf_bytes):
 def parse_star_rating(text_snippet):
     """Parse star rating from OCR text - handles various OCR interpretations of stars"""
     # Stars can be recognized as: *, **, ***, Kk, KKK, !, !!, !!!, > oo, etc.
-    # Count individual star characters
+
+    # First check for OCR patterns (Kk, bo &, etc.) which represent 3 stars
+    # This takes priority over counting individual symbols
+    text_lower = text_snippet.lower()
+
+    star_patterns = [
+        (r'k\s*k\s*k', 3),  # Three K's with possible spaces
+        (r'k\s*k', 3),   # Two K's often means 3 stars (Kk from OCR of ★★★)
+        (r'bo\s*&', 3),  # "bo &" is OCR misreading of 3 stars
+        (r'b\s*o', 3),   # "bo" or "b o" variation
+        (r'>\s*oo\.\s*[0-9]', 3),  # Pattern like "> oo. 4"
+        (r'>\s*oo', 3),  # Pattern like "> oo"
+    ]
+
+    for pattern, score in star_patterns:
+        if re.search(pattern, text_lower):
+            return score
+
+    # If no OCR patterns found, count individual star characters
     star_count = 0
 
     # Count asterisks (each * is one star)
@@ -62,33 +80,20 @@ def parse_star_rating(text_snippet):
     star_count += text_snippet.count('⭐')
 
     # Count exclamation marks (OCR sometimes reads stars as !)
-    exclamation_count = text_snippet.count('!')
-    if exclamation_count > 0:
-        star_count += exclamation_count
+    star_count += text_snippet.count('!')
 
-    if star_count > 0:
-        return star_count
+    # Check for repeated characters that might be stars
+    if star_count == 0:
+        repeated_char_patterns = [
+            (r'[!|l]{3,}', 3),  # Three or more !, |, or l characters
+            (r'[!|l]{2}', 2),  # Two !, |, or l characters
+        ]
 
-    # Check for OCR patterns if no direct stars found
-    # OCR often reads 3 stars (★★★) as "Kk", "KKK", "kkk", "bo &", etc.
-    # Different Tesseract versions may produce different results
-    star_patterns = [
-        (r'k\s*k\s*k', 3),  # Three K's with possible spaces
-        (r'k\s*k', 3),   # Two K's often means 3 stars (Kk from OCR of ★★★)
-        (r'bo\s*&', 3),  # "bo &" is OCR misreading of 3 stars
-        (r'b\s*o', 3),   # "bo" or "b o" variation
-        (r'>\s*oo\.\s*[0-9]', 3),  # Pattern like "> oo. 4"
-        (r'>\s*oo', 3),  # Pattern like "> oo"
-        (r'[!|l]{3,}', 3),  # Three or more !, |, or l characters
-        (r'[!|l]{2}', 2),  # Two !, |, or l characters
-    ]
+        for pattern, score in repeated_char_patterns:
+            if re.search(pattern, text_lower):
+                return score
 
-    text_lower = text_snippet.lower()
-    for pattern, score in star_patterns:
-        if re.search(pattern, text_lower):
-            return score
-
-    return 0
+    return star_count if star_count > 0 else 0
 
 def extract_skills_and_scores(pdf_bytes):
     """Extract assessment areas and scores from page 3 onwards"""
