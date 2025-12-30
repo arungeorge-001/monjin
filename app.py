@@ -123,6 +123,9 @@ def parse_skills_from_text(text):
     lines = [line.strip() for line in text.split('\n') if line.strip()]
 
     in_jd_skills_section = False
+    skill_names = []
+    ratings = []
+
     i = 0
 
     while i < len(lines):
@@ -160,30 +163,24 @@ def parse_skills_from_text(text):
                     if not re.search(r'\d', skill_name):
                         skills.append({'skill': skill_name, 'score': score})
 
-            # Pattern 2: Skill name on one line, stars on the next line
-            # e.g., "Kafka" followed by "xk" on next line
-            elif re.match(r'^[A-Za-z\s/\(\),]+$', line) and i + 1 < len(lines):
-                # First check that current line is NOT a rating pattern
-                # This prevents rating lines like "xk" from being treated as skill names
-                if not re.match(r'^[\*Kk>oo!\|lb&x\.\s0-9]+$', line):
-                    # Check if next line looks like a star rating
-                    next_line = lines[i + 1].strip()
-                    if re.match(r'^[\*Kk>oo!\|lb&x\.\s0-9]+$', next_line):
-                        skill_name = line.strip()
-                        rating_text = next_line
+            # Check if line is a rating pattern (all star characters)
+            elif re.match(r'^[\*Kk>oo!\|lb&x\.\s0-9]+$', line):
+                # This is a rating line
+                score = parse_star_rating(line)
+                if score > 0:
+                    ratings.append(score)
 
-                        # Parse the star rating
-                        score = parse_star_rating(rating_text)
-
-                        if skill_name and score > 0:
-                            # Filter out invalid skill names
-                            if not re.search(r'\d', skill_name):
-                                skills.append({'skill': skill_name, 'score': score})
-
-                        # Skip the next line since we've processed it (whether valid or not)
-                        i += 1
+            # Otherwise, it's a skill name
+            elif re.match(r'^[A-Za-z\s/\(\),]+$', line):
+                # Filter out invalid skill names (containing numbers)
+                if not re.search(r'\d', line):
+                    skill_names.append(line.strip())
 
         i += 1
+
+    # Match skill names with ratings in order
+    for idx in range(min(len(skill_names), len(ratings))):
+        skills.append({'skill': skill_names[idx], 'score': ratings[idx]})
 
     return skills
 
