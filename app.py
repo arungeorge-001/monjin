@@ -247,22 +247,32 @@ def extract_skills_with_claude(pdf_bytes, api_key):
                             },
                             {
                                 "type": "text",
-                                "text": """Analyze this interview assessment page. Extract skills with ratings from the "JD Skills Feedback" section ONLY (ignore "Timeline Skills Feedback").
+                                "text": """CRITICAL: Extract skills ONLY from "JD Skills Feedback" section. STOP immediately if you encounter any other section.
+
+SECTION RULES:
+1. Find the heading "JD Skills Feedback"
+2. Extract ONLY skills listed under this heading
+3. STOP processing when you see ANY of these headings:
+   - "Timeline Skills Feedback"
+   - "AI Assessment"
+   - "Summary of Questions"
+   - "Overall Feedback"
+   - Any other section heading
+4. IGNORE all other sections completely - do not extract anything from them
 
 COLOR DETECTION TASK:
-Each skill has 5 stars. You must distinguish by COLOR:
+Each skill under "JD Skills Feedback" has 5 stars. Distinguish by COLOR:
 - FILLED stars: ORANGE/GOLD/AMBER (bright warm color)
 - UNFILLED stars: GRAY/SILVER (dull neutral color)
 
-Count ONLY the orange/gold stars for each skill. Ignore gray stars completely.
-
 PROCESS:
-1. Locate "JD Skills Feedback" section
-2. For each skill:
+1. Locate "JD Skills Feedback" heading
+2. For each skill ONLY in this section:
    - Read skill name
    - Look at the 5 stars
    - Count ONLY orange/gold colored stars
    - Gray stars = 0 points
+3. STOP when you reach the next section heading
 
 EXAMPLES:
 - 3 orange + 2 gray = score 3
