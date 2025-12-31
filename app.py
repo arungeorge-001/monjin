@@ -239,7 +239,16 @@ def extract_skills_with_openai(pdf_bytes, api_key):
                                 "type": "text",
                                 "text": """Analyze this interview assessment page and extract skills with their star ratings from the "JD Skills Feedback" section ONLY. Do NOT include skills from "Timeline Skills Feedback" or other sections.
 
-For each skill, count ONLY the filled/colored stars (typically orange), NOT the empty/gray stars.
+CRITICAL: Each skill has a row of 5 stars. Some stars are FILLED (colored/orange) and some are EMPTY (gray/unfilled). You must count ONLY the filled/colored stars, NOT the total number of stars.
+
+For example:
+- If you see ★★★☆☆ (3 filled, 2 empty) → score is 3
+- If you see ★★☆☆☆ (2 filled, 3 empty) → score is 2
+- If you see ★☆☆☆☆ (1 filled, 4 empty) → score is 1
+
+Look carefully at the star colors:
+- Filled stars are typically ORANGE/COLORED
+- Empty stars are typically GRAY/LIGHT/UNFILLED
 
 Return the data as a JSON array with this exact format:
 [
@@ -249,8 +258,8 @@ Return the data as a JSON array with this exact format:
 
 Rules:
 - Only include skills from "JD Skills Feedback" section
-- Count only filled/colored stars (1-5)
-- Ignore empty/unfilled stars
+- Count ONLY filled/colored stars, NOT empty/gray ones
+- Each skill should have a score between 1-5
 - Return valid JSON only, no additional text"""
                             },
                             {
@@ -272,9 +281,10 @@ Rules:
 
             result_text = response.choices[0].message.content.strip()
 
-            # Debug: Show what OpenAI returned
-            st.write(f"**Debug - OpenAI Response for Page {page_num + 1}:**")
-            st.code(result_text)
+            # Optional debug output (can be enabled via session state)
+            if st.session_state.get('show_openai_debug', False):
+                st.write(f"**Debug - OpenAI Response for Page {page_num + 1}:**")
+                st.code(result_text)
 
             # Extract JSON from response (handle markdown code blocks)
             if result_text.startswith('```'):
@@ -526,8 +536,13 @@ def main():
     use_openai = st.checkbox("Use OpenAI Vision API (Recommended)", value=True,
                             help="Uses GPT-4 Vision to accurately count filled stars. Falls back to OCR if disabled or if API key is missing.")
 
-    # Debug mode toggle
+    # Debug mode toggles
     debug_mode = st.checkbox("Enable Debug Mode (show OCR output)", value=False)
+
+    if use_openai:
+        show_openai_debug = st.checkbox("Show OpenAI API responses", value=False,
+                                       help="Display raw JSON responses from OpenAI for debugging")
+        st.session_state['show_openai_debug'] = show_openai_debug
 
     # File upload
     uploaded_file = st.file_uploader("Choose a PDF file", type=['pdf'])
