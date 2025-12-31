@@ -9,6 +9,7 @@ import io
 import numpy as np
 import base64
 from openai import OpenAI
+import anthropic
 import json
 
 def is_filled_star_pixel(pixel_rgb):
@@ -208,6 +209,116 @@ def parse_star_rating(text_snippet, skill_name=None):
 
     return star_count if star_count > 0 else 0
 
+def extract_skills_with_claude(pdf_bytes, api_key):
+    """Extract skills and star ratings using Claude API (Anthropic)"""
+    skills_data = []
+
+    try:
+        client = anthropic.Anthropic(api_key=api_key)
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        total_pages = len(doc)
+
+        # Process pages 2 onwards (index 1 = page 2, index 2 = page 3, etc.)
+        for page_num in range(1, total_pages):
+            page = doc[page_num]
+
+            # Convert page to image
+            pix = page.get_pixmap(dpi=300)
+            img_data = pix.tobytes('png')
+
+            # Encode image to base64
+            base64_image = base64.b64encode(img_data).decode('utf-8')
+
+            # Call Claude API
+            message = client.messages.create(
+                model="claude-3-5-sonnet-20241022",
+                max_tokens=1500,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "image",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": "image/png",
+                                    "data": base64_image
+                                }
+                            },
+                            {
+                                "type": "text",
+                                "text": """Analyze this interview assessment page. Extract skills with ratings from the "JD Skills Feedback" section ONLY (ignore "Timeline Skills Feedback").
+
+COLOR DETECTION TASK:
+Each skill has 5 stars. You must distinguish by COLOR:
+- FILLED stars: ORANGE/GOLD/AMBER (bright warm color)
+- UNFILLED stars: GRAY/SILVER (dull neutral color)
+
+Count ONLY the orange/gold stars for each skill. Ignore gray stars completely.
+
+PROCESS:
+1. Locate "JD Skills Feedback" section
+2. For each skill:
+   - Read skill name
+   - Look at the 5 stars
+   - Count ONLY orange/gold colored stars
+   - Gray stars = 0 points
+
+EXAMPLES:
+- 3 orange + 2 gray = score 3
+- 2 orange + 3 gray = score 2
+- 1 orange + 4 gray = score 1
+
+Return ONLY valid JSON (no explanations):
+[
+  {"skill": "Skill Name", "score": 3},
+  {"skill": "Another Skill", "score": 2}
+]"""
+                            }
+                        ]
+                    }
+                ]
+            )
+
+            # Parse the response
+            if not message.content or len(message.content) == 0:
+                st.error(f"Empty response from Claude for page {page_num + 1}")
+                continue
+
+            result_text = message.content[0].text.strip()
+
+            # Optional debug output
+            if st.session_state.get('show_ai_debug', False):
+                st.write(f"**Debug - Claude Response for Page {page_num + 1}:**")
+                st.code(result_text)
+
+            # Extract JSON from response (handle markdown code blocks)
+            if result_text.startswith('```'):
+                parts = result_text.split('```')
+                if len(parts) >= 2:
+                    result_text = parts[1]
+                    if result_text.startswith('json'):
+                        result_text = result_text[4:]
+                    result_text = result_text.strip()
+
+            # Try to parse JSON
+            try:
+                page_skills = json.loads(result_text)
+                skills_data.extend(page_skills)
+            except json.JSONDecodeError as je:
+                st.error(f"Failed to parse JSON from Claude response on page {page_num + 1}")
+                st.error(f"JSON Error: {str(je)}")
+                st.code(result_text)
+                continue
+
+        doc.close()
+    except Exception as e:
+        st.error(f"Error with Claude extraction: {str(e)}")
+        st.exception(e)
+        return None
+
+    return skills_data if skills_data else None
+
 def extract_skills_with_openai(pdf_bytes, api_key):
     """Extract skills and star ratings using OpenAI Vision API"""
     skills_data = []
@@ -228,7 +339,7 @@ def extract_skills_with_openai(pdf_bytes, api_key):
             # Encode image to base64
             base64_image = base64.b64encode(img_data).decode('utf-8')
 
-            # Call OpenAI Vision API
+            # Call OpenAI Vision API with detailed image mode
             response = client.chat.completions.create(
                 model="gpt-4o",
                 messages=[
@@ -239,47 +350,47 @@ def extract_skills_with_openai(pdf_bytes, api_key):
                                 "type": "text",
                                 "text": """You are analyzing an interview assessment document. Extract skills and their ratings from the "JD Skills Feedback" section ONLY (NOT "Timeline Skills Feedback").
 
-VISUAL ANALYSIS INSTRUCTIONS:
-Look at the star rating system carefully. Each skill row shows 5 stars in total. The stars use a BINARY color system:
-1. FILLED/RATED stars: Appear in ORANGE/GOLD/YELLOW color (bright, saturated)
-2. UNFILLED/UNRATED stars: Appear in GRAY/LIGHT GRAY color (dull, desaturated)
+CRITICAL VISUAL TASK - COLOR DETECTION:
+You MUST distinguish between two types of stars based on their COLOR:
 
-Your task: Count ONLY the bright orange/gold colored stars. Ignore the gray ones completely.
+🟠 FILLED stars = ORANGE/AMBER/GOLD color (RGB values roughly: R=240-255, G=180-200, B=50-80)
+⚪ UNFILLED stars = GRAY/SILVER color (RGB values roughly: R=200-220, G=200-220, B=200-220)
 
-STEP-BY-STEP PROCESS:
-For each skill in "JD Skills Feedback":
-1. Locate the skill name on the left
-2. Look at the 5 stars to the right of that skill
-3. Identify which stars are ORANGE (filled/rated)
-4. Identify which stars are GRAY (unfilled/not rated)
-5. Count ONLY the orange stars - this is the score
-6. The score will be 1, 2, 3, 4, or 5 (never more than 5)
+IMPORTANT: The stars are the SAME SHAPE but DIFFERENT COLORS. You must analyze the COLOR of each star individually.
 
-COMMON MISTAKES TO AVOID:
-- DO NOT count gray stars
-- DO NOT count the total number of star shapes
-- DO NOT assume all visible stars are filled
-- The rating is based on COLOR, not shape count
+DETAILED PROCESS for each skill:
+1. Find the skill name (left side)
+2. Find the 5 star symbols to the right
+3. For EACH star individually, ask: "Is this star ORANGE or GRAY?"
+   - Orange star → count it
+   - Gray star → skip it
+4. Sum up the orange stars only = that's the score
 
-OUTPUT FORMAT:
-Return valid JSON array only, no explanations:
+EXAMPLE:
+If you see: [🟠][🟠][🟠][⚪][⚪] → Score is 3 (not 5!)
+If you see: [🟠][🟠][⚪][⚪][⚪] → Score is 2 (not 5!)
+If you see: [🟠][⚪][⚪][⚪][⚪] → Score is 1 (not 5!)
+
+The most common error is counting ALL 5 stars instead of just the colored ones. PAY ATTENTION TO COLOR.
+
+OUTPUT FORMAT (JSON only, no text):
 [
-  {"skill": "Exact Skill Name", "score": 3},
+  {"skill": "Skill Name", "score": 3},
   {"skill": "Another Skill", "score": 2}
-]
-
-Remember: Orange/gold = count it, Gray = ignore it."""
+]"""
                             },
                             {
                                 "type": "image_url",
                                 "image_url": {
-                                    "url": f"data:image/png;base64,{base64_image}"
+                                    "url": f"data:image/png;base64,{base64_image}",
+                                    "detail": "high"
                                 }
                             }
                         ]
                     }
                 ],
-                max_tokens=1000
+                max_tokens=1500,
+                temperature=0
             )
 
             # Parse the response
@@ -535,22 +646,34 @@ def main():
     st.title("Monjin - PDF Interview Assessment Extractor")
     st.write("Upload a PDF file to extract interview assessment data")
 
-    # OpenAI API Key input
+    # API Configuration
     st.subheader("Configuration")
-    api_key = st.text_input("OpenAI API Key (required for accurate star detection)", type="password",
-                            help="Enter your OpenAI API key. Get one at https://platform.openai.com/api-keys")
 
-    # Extraction method selection
-    use_openai = st.checkbox("Use OpenAI Vision API (Recommended)", value=True,
-                            help="Uses GPT-4 Vision to accurately count filled stars. Falls back to OCR if disabled or if API key is missing.")
+    # AI Provider selection
+    ai_provider = st.radio(
+        "Vision AI Provider",
+        options=["Claude (Recommended)", "OpenAI GPT-4o", "OCR Only (Free)"],
+        help="Claude generally performs better at color detection tasks"
+    )
 
-    # Debug mode toggles
+    # API Key input
+    if ai_provider != "OCR Only (Free)":
+        if ai_provider == "Claude (Recommended)":
+            api_key = st.text_input("Anthropic API Key", type="password",
+                                   help="Get your Claude API key at https://console.anthropic.com/")
+        else:  # OpenAI
+            api_key = st.text_input("OpenAI API Key", type="password",
+                                   help="Get your API key at https://platform.openai.com/api-keys")
+
+        # Debug mode for AI
+        show_ai_debug = st.checkbox("Show AI API responses", value=False,
+                                   help="Display raw JSON responses for debugging")
+        st.session_state['show_ai_debug'] = show_ai_debug
+    else:
+        api_key = None
+
+    # Debug mode toggle
     debug_mode = st.checkbox("Enable Debug Mode (show OCR output)", value=False)
-
-    if use_openai:
-        show_openai_debug = st.checkbox("Show OpenAI API responses", value=False,
-                                       help="Display raw JSON responses from OpenAI for debugging")
-        st.session_state['show_openai_debug'] = show_openai_debug
 
     # File upload
     uploaded_file = st.file_uploader("Choose a PDF file", type=['pdf'])
@@ -590,17 +713,27 @@ def main():
                     # Extract skills and scores
                     skills_data = None
 
-                    # Try OpenAI extraction if enabled and API key provided
-                    if use_openai and api_key:
+                    # Choose extraction method based on provider
+                    if ai_provider == "Claude (Recommended)" and api_key:
+                        with st.spinner("Analyzing PDF with Claude Vision API..."):
+                            skills_data = extract_skills_with_claude(pdf_bytes, api_key)
+
+                        if skills_data is None:
+                            st.warning("Claude extraction failed. Falling back to OCR method...")
+                            skills_data = extract_skills_and_scores(pdf_bytes)
+
+                    elif ai_provider == "OpenAI GPT-4o" and api_key:
                         with st.spinner("Analyzing PDF with OpenAI Vision API..."):
                             skills_data = extract_skills_with_openai(pdf_bytes, api_key)
 
                         if skills_data is None:
                             st.warning("OpenAI extraction failed. Falling back to OCR method...")
                             skills_data = extract_skills_and_scores(pdf_bytes)
+
                     else:
-                        if use_openai and not api_key:
-                            st.warning("OpenAI API key not provided. Using OCR method instead.")
+                        # OCR Only or no API key provided
+                        if ai_provider != "OCR Only (Free)" and not api_key:
+                            st.warning("API key not provided. Using OCR method instead.")
                         skills_data = extract_skills_and_scores(pdf_bytes)
 
                     if skills_data:
