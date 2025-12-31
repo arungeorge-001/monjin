@@ -266,25 +266,43 @@ Rules:
             )
 
             # Parse the response
+            if not response.choices or not response.choices[0].message.content:
+                st.error(f"Empty response from OpenAI for page {page_num + 1}")
+                continue
+
             result_text = response.choices[0].message.content.strip()
+
+            # Debug: Show what OpenAI returned
+            st.write(f"**Debug - OpenAI Response for Page {page_num + 1}:**")
+            st.code(result_text)
 
             # Extract JSON from response (handle markdown code blocks)
             if result_text.startswith('```'):
                 # Remove markdown code block formatting
-                result_text = result_text.split('```')[1]
-                if result_text.startswith('json'):
-                    result_text = result_text[4:]
-                result_text = result_text.strip()
+                parts = result_text.split('```')
+                if len(parts) >= 2:
+                    result_text = parts[1]
+                    if result_text.startswith('json'):
+                        result_text = result_text[4:]
+                    result_text = result_text.strip()
 
-            page_skills = json.loads(result_text)
-            skills_data.extend(page_skills)
+            # Try to parse JSON
+            try:
+                page_skills = json.loads(result_text)
+                skills_data.extend(page_skills)
+            except json.JSONDecodeError as je:
+                st.error(f"Failed to parse JSON from OpenAI response on page {page_num + 1}")
+                st.error(f"JSON Error: {str(je)}")
+                st.code(result_text)
+                continue
 
         doc.close()
     except Exception as e:
         st.error(f"Error with OpenAI extraction: {str(e)}")
+        st.exception(e)
         return None
 
-    return skills_data
+    return skills_data if skills_data else None
 
 def extract_skills_and_scores(pdf_bytes):
     """Extract assessment areas and scores from page 2 onwards (OCR fallback)"""
