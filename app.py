@@ -7,6 +7,9 @@ from PIL import Image
 import pytesseract
 import io
 import numpy as np
+import base64
+from openai import OpenAI
+import json
 
 def is_filled_star_pixel(pixel_rgb):
     """Check if pixel is part of a filled (orange) star"""
@@ -205,8 +208,86 @@ def parse_star_rating(text_snippet, skill_name=None):
 
     return star_count if star_count > 0 else 0
 
+def extract_skills_with_openai(pdf_bytes, api_key):
+    """Extract skills and star ratings using OpenAI Vision API"""
+    skills_data = []
+
+    try:
+        client = OpenAI(api_key=api_key)
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        total_pages = len(doc)
+
+        # Process pages 2 onwards (index 1 = page 2, index 2 = page 3, etc.)
+        for page_num in range(1, total_pages):
+            page = doc[page_num]
+
+            # Convert page to image
+            pix = page.get_pixmap(dpi=300)
+            img_data = pix.tobytes('png')
+
+            # Encode image to base64
+            base64_image = base64.b64encode(img_data).decode('utf-8')
+
+            # Call OpenAI Vision API
+            response = client.chat.completions.create(
+                model="gpt-4o",
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": """Analyze this interview assessment page and extract skills with their star ratings from the "JD Skills Feedback" section ONLY. Do NOT include skills from "Timeline Skills Feedback" or other sections.
+
+For each skill, count ONLY the filled/colored stars (typically orange), NOT the empty/gray stars.
+
+Return the data as a JSON array with this exact format:
+[
+  {"skill": "Skill Name", "score": 3},
+  {"skill": "Another Skill", "score": 2}
+]
+
+Rules:
+- Only include skills from "JD Skills Feedback" section
+- Count only filled/colored stars (1-5)
+- Ignore empty/unfilled stars
+- Return valid JSON only, no additional text"""
+                            },
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/png;base64,{base64_image}"
+                                }
+                            }
+                        ]
+                    }
+                ],
+                max_tokens=1000
+            )
+
+            # Parse the response
+            result_text = response.choices[0].message.content.strip()
+
+            # Extract JSON from response (handle markdown code blocks)
+            if result_text.startswith('```'):
+                # Remove markdown code block formatting
+                result_text = result_text.split('```')[1]
+                if result_text.startswith('json'):
+                    result_text = result_text[4:]
+                result_text = result_text.strip()
+
+            page_skills = json.loads(result_text)
+            skills_data.extend(page_skills)
+
+        doc.close()
+    except Exception as e:
+        st.error(f"Error with OpenAI extraction: {str(e)}")
+        return None
+
+    return skills_data
+
 def extract_skills_and_scores(pdf_bytes):
-    """Extract assessment areas and scores from page 2 onwards"""
+    """Extract assessment areas and scores from page 2 onwards (OCR fallback)"""
     skills_data = []
 
     try:
@@ -418,6 +499,15 @@ def main():
     st.title("Monjin - PDF Interview Assessment Extractor")
     st.write("Upload a PDF file to extract interview assessment data")
 
+    # OpenAI API Key input
+    st.subheader("Configuration")
+    api_key = st.text_input("OpenAI API Key (required for accurate star detection)", type="password",
+                            help="Enter your OpenAI API key. Get one at https://platform.openai.com/api-keys")
+
+    # Extraction method selection
+    use_openai = st.checkbox("Use OpenAI Vision API (Recommended)", value=True,
+                            help="Uses GPT-4 Vision to accurately count filled stars. Falls back to OCR if disabled or if API key is missing.")
+
     # Debug mode toggle
     debug_mode = st.checkbox("Enable Debug Mode (show OCR output)", value=False)
 
@@ -457,7 +547,20 @@ def main():
                             st.error(f"Debug error: {str(e)}")
 
                     # Extract skills and scores
-                    skills_data = extract_skills_and_scores(pdf_bytes)
+                    skills_data = None
+
+                    # Try OpenAI extraction if enabled and API key provided
+                    if use_openai and api_key:
+                        with st.spinner("Analyzing PDF with OpenAI Vision API..."):
+                            skills_data = extract_skills_with_openai(pdf_bytes, api_key)
+
+                        if skills_data is None:
+                            st.warning("OpenAI extraction failed. Falling back to OCR method...")
+                            skills_data = extract_skills_and_scores(pdf_bytes)
+                    else:
+                        if use_openai and not api_key:
+                            st.warning("OpenAI API key not provided. Using OCR method instead.")
+                        skills_data = extract_skills_and_scores(pdf_bytes)
 
                     if skills_data:
                         # Create output dataframe

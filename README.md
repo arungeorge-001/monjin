@@ -6,7 +6,10 @@ A Streamlit application that extracts interview assessment data from PDF files a
 
 - Upload PDF interview documents (including image-based PDFs)
 - Extract candidate name from first page using OCR
-- Extract assessment areas and scores (based on star ratings) from page 3 onwards
+- **OpenAI Vision API Integration** - Accurately count filled stars using GPT-4 Vision (recommended)
+- OCR fallback method for extraction without API key
+- Extract assessment areas and scores (based on star ratings) from page 2 onwards
+- Only extract from "JD Skills Feedback" section
 - Generate Excel output with standardized format
 - Download processed results
 
@@ -34,13 +37,31 @@ streamlit run app.py
 
 2. Open your browser and navigate to the URL shown (usually http://localhost:8501)
 
-3. Upload a PDF file using the file uploader
+3. **Enter your OpenAI API Key** (optional but recommended for accurate results)
+   - Get an API key at https://platform.openai.com/api-keys
+   - Check "Use OpenAI Vision API" for best accuracy
 
-4. Click "Process File" button
+4. Upload a PDF file using the file uploader
 
-5. View the extracted data in the table
+5. Click "Process File" button
 
-6. Download the Excel output using the "Download Excel Output" button
+6. View the extracted data in the table
+
+7. Download the Excel output using the "Download Excel Output" button
+
+### Extraction Methods
+
+**OpenAI Vision API (Recommended)**
+- Most accurate method for counting filled vs unfilled stars
+- Directly analyzes the PDF images using GPT-4 Vision
+- Requires an OpenAI API key
+- Costs approximately $0.01-0.02 per page
+
+**OCR Fallback**
+- Uses pattern matching on OCR text
+- Free but less accurate
+- May miscount stars in some cases
+- Used automatically if no API key is provided
 
 ## Output Format
 
@@ -69,7 +90,10 @@ The application generates an Excel file with the following columns:
 - pymupdf
 - pytesseract
 - pillow
+- numpy
+- openai
 - Tesseract OCR (system dependency)
+- OpenAI API key (optional, for Vision API)
 
 ## Troubleshooting
 
