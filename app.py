@@ -197,7 +197,7 @@ def parse_star_rating(text_snippet):
     return star_count if star_count > 0 else 0
 
 def extract_skills_and_scores(pdf_bytes):
-    """Extract assessment areas and scores from page 2 onwards using image-based star detection"""
+    """Extract assessment areas and scores from page 2 onwards"""
     skills_data = []
 
     try:
@@ -208,18 +208,9 @@ def extract_skills_and_scores(pdf_bytes):
         for page_num in range(1, total_pages):
             page = doc[page_num]
 
-            # Extract text with bounding boxes and get the image
-            text, img, ocr_data = extract_text_from_page_ocr(page, return_bounding_boxes=True)
-
-            if img is None or ocr_data is None:
-                # Fallback to OCR-only mode
-                text = extract_text_from_page_ocr(page)
-                skills_data.extend(parse_skills_from_text(text))
-                continue
-
-            # Parse skill names from text
-            skills_with_positions = parse_skills_with_image_detection(text, img, ocr_data)
-            skills_data.extend(skills_with_positions)
+            # Use OCR-based extraction (image-based detection not working reliably)
+            text = extract_text_from_page_ocr(page)
+            skills_data.extend(parse_skills_from_text(text))
 
         doc.close()
     except Exception as e:
