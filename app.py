@@ -237,30 +237,38 @@ def extract_skills_with_openai(pdf_bytes, api_key):
                         "content": [
                             {
                                 "type": "text",
-                                "text": """Analyze this interview assessment page and extract skills with their star ratings from the "JD Skills Feedback" section ONLY. Do NOT include skills from "Timeline Skills Feedback" or other sections.
+                                "text": """You are analyzing an interview assessment document. Extract skills and their ratings from the "JD Skills Feedback" section ONLY (NOT "Timeline Skills Feedback").
 
-CRITICAL: Each skill has a row of 5 stars. Some stars are FILLED (colored/orange) and some are EMPTY (gray/unfilled). You must count ONLY the filled/colored stars, NOT the total number of stars.
+VISUAL ANALYSIS INSTRUCTIONS:
+Look at the star rating system carefully. Each skill row shows 5 stars in total. The stars use a BINARY color system:
+1. FILLED/RATED stars: Appear in ORANGE/GOLD/YELLOW color (bright, saturated)
+2. UNFILLED/UNRATED stars: Appear in GRAY/LIGHT GRAY color (dull, desaturated)
 
-For example:
-- If you see ★★★☆☆ (3 filled, 2 empty) → score is 3
-- If you see ★★☆☆☆ (2 filled, 3 empty) → score is 2
-- If you see ★☆☆☆☆ (1 filled, 4 empty) → score is 1
+Your task: Count ONLY the bright orange/gold colored stars. Ignore the gray ones completely.
 
-Look carefully at the star colors:
-- Filled stars are typically ORANGE/COLORED
-- Empty stars are typically GRAY/LIGHT/UNFILLED
+STEP-BY-STEP PROCESS:
+For each skill in "JD Skills Feedback":
+1. Locate the skill name on the left
+2. Look at the 5 stars to the right of that skill
+3. Identify which stars are ORANGE (filled/rated)
+4. Identify which stars are GRAY (unfilled/not rated)
+5. Count ONLY the orange stars - this is the score
+6. The score will be 1, 2, 3, 4, or 5 (never more than 5)
 
-Return the data as a JSON array with this exact format:
+COMMON MISTAKES TO AVOID:
+- DO NOT count gray stars
+- DO NOT count the total number of star shapes
+- DO NOT assume all visible stars are filled
+- The rating is based on COLOR, not shape count
+
+OUTPUT FORMAT:
+Return valid JSON array only, no explanations:
 [
-  {"skill": "Skill Name", "score": 3},
+  {"skill": "Exact Skill Name", "score": 3},
   {"skill": "Another Skill", "score": 2}
 ]
 
-Rules:
-- Only include skills from "JD Skills Feedback" section
-- Count ONLY filled/colored stars, NOT empty/gray ones
-- Each skill should have a score between 1-5
-- Return valid JSON only, no additional text"""
+Remember: Orange/gold = count it, Gray = ignore it."""
                             },
                             {
                                 "type": "image_url",
