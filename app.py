@@ -212,6 +212,7 @@ def parse_star_rating(text_snippet, skill_name=None):
 def extract_skills_with_claude(pdf_bytes, api_key):
     """Extract skills and star ratings using Claude API (Anthropic)"""
     skills_data = []
+    found_jd_skills = False
 
     try:
         client = anthropic.Anthropic(api_key=api_key)
@@ -247,43 +248,39 @@ def extract_skills_with_claude(pdf_bytes, api_key):
                             },
                             {
                                 "type": "text",
-                                "text": """CRITICAL: Extract skills ONLY from "JD Skills Feedback" section. STOP immediately if you encounter any other section.
+                                "text": """CRITICAL INSTRUCTION: Extract skills ONLY from "JD Skills Feedback" section. If this page does not contain "JD Skills Feedback", return an empty array [].
 
-SECTION RULES:
-1. Find the heading "JD Skills Feedback"
-2. Extract ONLY skills listed under this heading
-3. STOP processing when you see ANY of these headings:
-   - "Timeline Skills Feedback"
-   - "AI Assessment"
-   - "Summary of Questions"
-   - "Overall Feedback"
-   - Any other section heading
-4. IGNORE all other sections completely - do not extract anything from them
+SECTION IDENTIFICATION:
+1. Check if this page has the heading "JD Skills Feedback"
+2. If YES: Extract skills ONLY from under this heading, STOP when you see "Timeline Skills Feedback" or any other section
+3. If NO: Return [] immediately (empty array)
 
-COLOR DETECTION TASK:
-Each skill under "JD Skills Feedback" has 5 stars. Distinguish by COLOR:
-- FILLED stars: ORANGE/GOLD/AMBER (bright warm color)
-- UNFILLED stars: GRAY/SILVER (dull neutral color)
+WHAT TO IGNORE (return [] for these):
+- Pages with "Timeline Skills Feedback" heading
+- Pages with "AI Assessment" heading
+- Pages with "Summary of Questions" heading
+- Pages with "Overall Feedback" heading
+- Any page without "JD Skills Feedback" heading
 
-PROCESS:
-1. Locate "JD Skills Feedback" heading
-2. For each skill ONLY in this section:
-   - Read skill name
-   - Look at the 5 stars
-   - Count ONLY orange/gold colored stars
-   - Gray stars = 0 points
-3. STOP when you reach the next section heading
+COLOR DETECTION (only for "JD Skills Feedback" section):
+Each skill has 5 stars. Count by COLOR:
+- FILLED stars: ORANGE/GOLD/AMBER (bright warm color) → COUNT THESE
+- UNFILLED stars: GRAY/SILVER (dull neutral color) → DO NOT COUNT
 
 EXAMPLES:
 - 3 orange + 2 gray = score 3
 - 2 orange + 3 gray = score 2
 - 1 orange + 4 gray = score 1
 
-Return ONLY valid JSON (no explanations):
+OUTPUT FORMAT - Return ONLY valid JSON:
+If page has "JD Skills Feedback":
 [
   {"skill": "Skill Name", "score": 3},
   {"skill": "Another Skill", "score": 2}
-]"""
+]
+
+If page does NOT have "JD Skills Feedback":
+[]"""
                             }
                         ]
                     }
@@ -314,7 +311,15 @@ Return ONLY valid JSON (no explanations):
             # Try to parse JSON
             try:
                 page_skills = json.loads(result_text)
-                skills_data.extend(page_skills)
+
+                # If we got skills from this page, mark that we found JD Skills section
+                if page_skills and len(page_skills) > 0:
+                    found_jd_skills = True
+                    skills_data.extend(page_skills)
+                    # Stop processing after we've found JD Skills Feedback
+                    st.info(f"Found {len(page_skills)} skills from JD Skills Feedback on page {page_num + 1}. Stopping further page processing.")
+                    break
+
             except json.JSONDecodeError as je:
                 st.error(f"Failed to parse JSON from Claude response on page {page_num + 1}")
                 st.error(f"JSON Error: {str(je)}")
@@ -332,6 +337,7 @@ Return ONLY valid JSON (no explanations):
 def extract_skills_with_openai(pdf_bytes, api_key):
     """Extract skills and star ratings using OpenAI Vision API"""
     skills_data = []
+    found_jd_skills = False
 
     try:
         client = OpenAI(api_key=api_key)
@@ -358,15 +364,24 @@ def extract_skills_with_openai(pdf_bytes, api_key):
                         "content": [
                             {
                                 "type": "text",
-                                "text": """You are analyzing an interview assessment document. Extract skills and their ratings from the "JD Skills Feedback" section ONLY (NOT "Timeline Skills Feedback").
+                                "text": """CRITICAL INSTRUCTION: Extract skills ONLY from "JD Skills Feedback" section. If this page does not contain "JD Skills Feedback", return an empty array [].
 
-CRITICAL VISUAL TASK - COLOR DETECTION:
+SECTION IDENTIFICATION:
+1. Check if this page has the heading "JD Skills Feedback"
+2. If YES: Extract skills ONLY from under this heading, STOP when you see "Timeline Skills Feedback" or any other section
+3. If NO: Return [] immediately (empty array)
+
+WHAT TO IGNORE (return [] for these):
+- Pages with "Timeline Skills Feedback" heading
+- Pages with "AI Assessment" heading
+- Pages with "Summary of Questions" heading
+- Pages with "Overall Feedback" heading
+- Any page without "JD Skills Feedback" heading
+
+COLOR DETECTION (only for "JD Skills Feedback" section):
 You MUST distinguish between two types of stars based on their COLOR:
-
-🟠 FILLED stars = ORANGE/AMBER/GOLD color (RGB values roughly: R=240-255, G=180-200, B=50-80)
-⚪ UNFILLED stars = GRAY/SILVER color (RGB values roughly: R=200-220, G=200-220, B=200-220)
-
-IMPORTANT: The stars are the SAME SHAPE but DIFFERENT COLORS. You must analyze the COLOR of each star individually.
+🟠 FILLED stars = ORANGE/AMBER/GOLD color (bright warm color) → COUNT THESE
+⚪ UNFILLED stars = GRAY/SILVER color (dull neutral color) → DO NOT COUNT
 
 DETAILED PROCESS for each skill:
 1. Find the skill name (left side)
@@ -376,18 +391,20 @@ DETAILED PROCESS for each skill:
    - Gray star → skip it
 4. Sum up the orange stars only = that's the score
 
-EXAMPLE:
-If you see: [🟠][🟠][🟠][⚪][⚪] → Score is 3 (not 5!)
-If you see: [🟠][🟠][⚪][⚪][⚪] → Score is 2 (not 5!)
-If you see: [🟠][⚪][⚪][⚪][⚪] → Score is 1 (not 5!)
+EXAMPLES:
+- 3 orange + 2 gray = score 3
+- 2 orange + 3 gray = score 2
+- 1 orange + 4 gray = score 1
 
-The most common error is counting ALL 5 stars instead of just the colored ones. PAY ATTENTION TO COLOR.
-
-OUTPUT FORMAT (JSON only, no text):
+OUTPUT FORMAT - Return ONLY valid JSON:
+If page has "JD Skills Feedback":
 [
   {"skill": "Skill Name", "score": 3},
   {"skill": "Another Skill", "score": 2}
-]"""
+]
+
+If page does NOT have "JD Skills Feedback":
+[]"""
                             },
                             {
                                 "type": "image_url",
@@ -411,7 +428,7 @@ OUTPUT FORMAT (JSON only, no text):
             result_text = response.choices[0].message.content.strip()
 
             # Optional debug output (can be enabled via session state)
-            if st.session_state.get('show_openai_debug', False):
+            if st.session_state.get('show_ai_debug', False):
                 st.write(f"**Debug - OpenAI Response for Page {page_num + 1}:**")
                 st.code(result_text)
 
@@ -428,7 +445,15 @@ OUTPUT FORMAT (JSON only, no text):
             # Try to parse JSON
             try:
                 page_skills = json.loads(result_text)
-                skills_data.extend(page_skills)
+
+                # If we got skills from this page, mark that we found JD Skills section
+                if page_skills and len(page_skills) > 0:
+                    found_jd_skills = True
+                    skills_data.extend(page_skills)
+                    # Stop processing after we've found JD Skills Feedback
+                    st.info(f"Found {len(page_skills)} skills from JD Skills Feedback on page {page_num + 1}. Stopping further page processing.")
+                    break
+
             except json.JSONDecodeError as je:
                 st.error(f"Failed to parse JSON from OpenAI response on page {page_num + 1}")
                 st.error(f"JSON Error: {str(je)}")
