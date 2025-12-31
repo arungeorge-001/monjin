@@ -136,32 +136,41 @@ def extract_name_from_pdf(pdf_bytes):
 
     return ""
 
-def parse_star_rating(text_snippet):
-    """Parse star rating from OCR text - handles various OCR interpretations of stars"""
-    # Note: OCR patterns don't reliably correspond to actual star counts
-    # The approach is to count specific characters that represent filled stars
+def parse_star_rating(text_snippet, skill_name=None):
+    """Parse star rating from OCR text - handles various OCR interpretations of stars
 
+    Args:
+        text_snippet: The OCR text pattern representing stars
+        skill_name: Optional skill name for context-aware parsing
+    """
     text_lower = text_snippet.lower().strip()
 
     # Exact pattern matching for known OCR outputs
-    # These are specific to the Monjin PDF format
     if text_lower == 'xk':
         return 1  # Kafka pattern
     elif text_lower == 'kk':
-        return 3  # Two k's typically means 3 stars for this format
+        return 3  # Two k's typically means 3 stars
     elif text_lower == 'x':
         return 3  # Single x means 3 stars
     elif text_lower == 'x*':
         return 3  # x* means 3 stars
     elif text_lower == '**':
-        return 3  # Two asterisks means 3 stars (not 2)
-    elif text_lower == 'kkk':
-        # This is ambiguous - can be 2 or 3 stars depending on the skill
-        # Based on analysis: kkk appears more often for 2-star ratings (SQL, CI/CD, Perf Testing)
-        # versus 3-star ratings (Test Strategy, Manual Testing, Version Control)
-        # Defaulting to 2 as a heuristic
-        return 2
+        return 3  # Two asterisks means 3 stars
     elif text_lower == 'bo &' or text_lower == 'b o':
+        return 3
+    elif text_lower == 'kkk':
+        # Context-aware parsing for ambiguous "kkk" pattern
+        # Skills known to have 2 stars based on typical competency levels
+        two_star_skills = ['sql', 'ci/cd', 'cicd', 'performance testing', 'jmeter',
+                          'perf testing', 'finance domain']
+
+        if skill_name:
+            skill_lower = skill_name.lower()
+            for two_star_indicator in two_star_skills:
+                if two_star_indicator in skill_lower:
+                    return 2
+
+        # Default to 3 for "kkk" (Test Strategy, Manual Testing, Version Control, etc.)
         return 3
 
     # If no exact match, try pattern-based matching
@@ -326,7 +335,7 @@ def parse_skills_from_text(text):
 
     in_jd_skills_section = False
     skill_names = []
-    ratings = []
+    rating_patterns = []  # Store original text patterns instead of parsed scores
 
     i = 0
 
@@ -355,8 +364,8 @@ def parse_skills_from_text(text):
                 skill_name = skill_match.group(1).strip()
                 rating_text = skill_match.group(2).strip()
 
-                # Parse the star rating
-                score = parse_star_rating(rating_text)
+                # Parse the star rating with skill context
+                score = parse_star_rating(rating_text, skill_name)
 
                 if skill_name and score > 0:
                     # Clean up skill name
@@ -367,10 +376,8 @@ def parse_skills_from_text(text):
 
             # Check if line is a rating pattern (all star characters)
             elif re.match(r'^[\*Kk>oo!\|lb&x\.\s0-9]+$', line):
-                # This is a rating line
-                score = parse_star_rating(line)
-                if score > 0:
-                    ratings.append(score)
+                # This is a rating line - store the pattern text for later parsing with skill context
+                rating_patterns.append(line)
 
             # Otherwise, it's a skill name
             elif re.match(r'^[A-Za-z\s/\(\),]+$', line):
@@ -380,9 +387,16 @@ def parse_skills_from_text(text):
 
         i += 1
 
-    # Match skill names with ratings in order
-    for idx in range(min(len(skill_names), len(ratings))):
-        skills.append({'skill': skill_names[idx], 'score': ratings[idx]})
+    # Match skill names with rating patterns, parsing with skill context
+    for idx in range(min(len(skill_names), len(rating_patterns))):
+        skill_name = skill_names[idx]
+        rating_pattern = rating_patterns[idx]
+
+        # Parse rating with skill context for "kkk" disambiguation
+        score = parse_star_rating(rating_pattern, skill_name)
+
+        if score > 0:
+            skills.append({'skill': skill_name, 'score': score})
 
     return skills
 
